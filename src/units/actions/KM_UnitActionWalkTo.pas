@@ -358,7 +358,7 @@ begin
     NodeList.Insert(NodePos+1, ForcedExchangePos);
     if KMSamePoint(fUnit.CurrPosition, ForcedExchangePos) then
       raise ELocError.Create('Exchange to same place', fUnit.CurrPosition);
-    fUnit.Direction := KMGetDirection(fUnit.CurrPosition, ForcedExchangePos);
+    fUnit.Direction := KMGetDirection(fUnit.CurrPosition, ForcedExchangePos); //we don't turn around while exchanging
     fDoesWalking := True;
   end
   else
@@ -371,15 +371,35 @@ begin
 end;
 
 
-//Used for dodging and side stepping
+//Used for dodging and side stepping (rarely gets used)
 procedure TKMUnitActionWalkTo.ChangeStepTo(const aPos: TKMPoint);
+var
+  OldDir: TKMDirection;
+  NewDir: TKMDirection;
+  DirectionDiff: Byte;
+  DirectionRotationDiff: Byte;
 begin
   if (NodePos+2 <= NodeList.Count-1) and (KMLengthDiag(aPos, NodeList[NodePos+2]) < 1.5) then
     NodeList[NodePos+1] := aPos //We can simply replace the entry because it is near the next tile
   else //Otherwise we must insert it
     NodeList.Insert(NodePos+1, aPos);
 
-  fUnit.Direction := KMGetDirection(fUnit.CurrPosition, aPos); //Face the new tile
+	NewDir := KMGetDirection(fUnit.CurrPosition, aPos);
+    OldDir := fUnit.Direction;
+	if (NewDir <> OldDir) then begin
+    DirectionDiff := GetDirModifier(NewDir, OldDir); // lets check how many turns are we away from desired look direction!
+    //if(OldDir < NewDir) then //and if not (DirectionDiff < 4) then
+      DirectionRotationDiff := GetDirModifier(NewDir, KMNextDirection(OldDir)); //let's check if turning right is good idea
+      if(DirectionDiff < DirectionRotationDiff) then
+        fUnit.Direction := KMNextDirection(OldDir);
+    //if(OldDir > NewDir) then
+      DirectionRotationDiff := GetDirModifier(NewDir, KMPrevDirection(OldDir)); //let's check if turning left is good idea
+      if(DirectionDiff < DirectionRotationDiff) then
+        fUnit.Direction := KMPrevDirection(OldDir);
+	end;
+	exit;
+  
+  //fUnit.Direction := KMGetDirection(fUnit.CurrPosition, aPos); //Face the new tile
 end;
 
 
@@ -524,6 +544,7 @@ begin
       begin
         //Restore direction, cause it usually looks unpleasant,
         //when warrior turns to locked Loc and then immidiately (in 1 tick) turns away when on new route
+		//this makes warriors turn around in place or when standing still
         fUnit.Direction := aDir;
         fUnit.SetActionWalk(fWalkTo, fType, fDistance, fTargetUnit, fTargetHouse);
         Result := ocReRouteMade;
@@ -1041,6 +1062,9 @@ var
   DX,DY: Shortint;
   WalkX,WalkY,Distance: Single;
   OldDir: TKMDirection;
+  NewDir: TKMDirection;
+  DirectionDiff: Byte;
+  DirectionRotationDiff: Byte;
 begin
   Result := arActContinues;
   StepDone := False;
@@ -1120,11 +1144,29 @@ begin
         Exit;
 
     //Walk complete
+	NewDir := KMGetDirection(NodeList[NodePos], fWalkTo);
+    OldDir := fUnit.Direction;
+	
     if not fDoExchange and CheckWalkComplete then
     begin
       if (fDistance > 0) and ((fUnit.Task = nil) or (not fUnit.Task.WalkShouldAbandon))
         and not KMSamePoint(NodeList[NodePos], fWalkTo) then //Happens rarely when we asked to sidestep towards our not locked target (Warrior)
-        fUnit.Direction := KMGetDirection(NodeList[NodePos], fWalkTo); //Face tile (e.g. worker)
+
+		if(NewDir <> OldDir) then begin
+		//We aren't facing right way!
+		DirectionDiff := GetDirModifier(NewDir, OldDir); // lets check how many turns are we away from desired look direction!
+		DirectionRotationDiff := GetDirModifier(NewDir, KMNextDirection(OldDir)); //let's check if turning right is good idea
+		if(DirectionDiff < DirectionRotationDiff) then
+			fUnit.Direction := KMNextDirection(OldDir);
+			
+		DirectionRotationDiff := GetDirModifier(NewDir, KMPrevDirection(OldDir)); //let's check if turning left is good idea
+		if(DirectionDiff < DirectionRotationDiff) then
+			fUnit.Direction := KMPrevDirection(OldDir);
+			
+		exit;
+    end;
+		
+      //fUnit.Direction := KMGetDirection(NodeList[NodePos], fWalkTo); //Face tile (e.g. worker) [only workers groups use unit group]
       Result := arActDone;
       Exit;
     end;
@@ -1150,11 +1192,51 @@ begin
       fPass := CanWalk;}
 
     //Save unit dir in case we will need to restore it
-    OldDir := fUnit.Direction;
+	OldDir := fUnit.Direction;
+	NewDir := KMGetDirection(NodeList[NodePos], NodeList[NodePos+1]);
 
     //Update unit direction according to next Node
-    fUnit.Direction := KMGetDirection(NodeList[NodePos], NodeList[NodePos+1]);
+    //fUnit.Direction := KMGetDirection(NodeList[NodePos], NodeList[NodePos+1]);
 
+	//We aren't facing right way!
+	if (NewDir <> OldDir) then begin
+    DirectionDiff := GetDirModifier(NewDir, OldDir); // lets check how many turns are we away from desired look direction!
+    //if(OldDir < NewDir) then //and if not (DirectionDiff < 4) then
+      DirectionRotationDiff := GetDirModifier(NewDir, KMNextDirection(OldDir)); //let's check if turning right is good idea
+      if(DirectionDiff < DirectionRotationDiff) then
+        fUnit.Direction := KMNextDirection(OldDir);
+    //if(OldDir > NewDir) then
+      DirectionRotationDiff := GetDirModifier(NewDir, KMPrevDirection(OldDir)); //let's check if turning left is good idea
+      if(DirectionDiff < DirectionRotationDiff) then
+        fUnit.Direction := KMPrevDirection(OldDir);
+    //DirectionDiff := GetDirModifier(NewDir, OldDir);
+   // if(DirectionDiff < 4) then
+   //   fUnit.Direction := KMPrevDirection(OldDir);
+   // if(DirectionDiff > 3) then
+   //   fUnit.Direction := KMNextDirection(OldDir);
+    //System.log
+    //OldDirdiff := OldDirdiff + 1;
+    //if not(OldDirdiff = 0) then
+    //begin
+    //DirectionDiff := (DirectionDiff div DirectionDiff);
+    //end;
+    //if ((OldDirdiff = 0) and (OldDirdiff > 0)) then
+    //begin
+    //  OldDirdiff := (OldDirdiff - 1);
+    //end;
+    //if then()
+    //fUnit.Direction := KMAddDirection(NewDir, DirectionDiff);
+    //if then
+
+    //if(OldDir > dirNA) then
+    //  fUnit.Direction := KMNextDirection(OldDir);
+    //if(OldDir < dirNA) then
+    //  fUnit.Direction := KMPrevDirection(OldDir);
+    //fUnit.Direction := fUnit.Direction + DirN; //+ KMGetDirection(1, 1);
+    //if(OldDir2 > 0) then //when we are facing close to 0
+	
+		exit;
+    end;
     //Check if we can walk to next tile in the route
     //Don't use CanAbandonInternal because skipping this check can cause crashes
     if not fDoExchange then
